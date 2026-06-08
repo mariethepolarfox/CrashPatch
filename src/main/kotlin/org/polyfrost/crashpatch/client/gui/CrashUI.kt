@@ -35,6 +35,7 @@ import net.minecraft.CrashReport
 import net.minecraft.ReportType
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.resources.language.I18n
+import org.apache.logging.log4j.LogManager
 import org.polyfrost.crashpatch.client.LogUploader
 import org.polyfrost.crashpatch.client.crashes.CrashScan
 import org.polyfrost.crashpatch.client.crashes.CrashScanner
@@ -64,6 +65,7 @@ class CrashUI @JvmOverloads constructor(
     )
 
     companion object {
+        private val LOGGER = LogManager.getLogger()
         var leaveWorldCrash = false
         var currentInstance: Screen? = null
             private set
@@ -219,11 +221,16 @@ class CrashUI @JvmOverloads constructor(
                                 statusText = "Copied solutions to clipboard."
                             }
                             ActionButton("Upload solutions") {
-                                val body = activeSolution.solutions.joinToString("\n") + "\n\n" +
-                                        (if (!activeSolution.isCrashReport) scanText else "")
+                                val body = buildString {
+                                    append(activeSolution.solutions.joinToString("\n"))
+                                    append("\n\n")
+                                    if (!activeSolution.isCrashReport) append(scanText)
+                                }
                                 val link = LogUploader.upload(body)
                                 clipboardManager.setText(AnnotatedString(link))
-                                val opened = runCatching { DesktopHelper.browse(URI.create(link)) }.getOrDefault(false)
+                                val opened = runCatching { DesktopHelper.browse(URI.create(link)) }
+                                    .onFailure { LOGGER.warn("Failed to open uploaded link.", it) }
+                                    .getOrDefault(false)
                                 statusText = if (opened) {
                                     "Uploaded and opened link. Copied to clipboard."
                                 } else {
@@ -246,7 +253,8 @@ class CrashUI @JvmOverloads constructor(
                     modifier = Modifier.clickable {
                         val opened = runCatching {
                             DesktopHelper.browse(URI.create(tr("crashpatch.link.discord.polyfrost")))
-                        }.getOrDefault(false)
+                        }.onFailure { LOGGER.warn("Failed to open Discord link.", it) }
+                            .getOrDefault(false)
                         if (!opened) statusText = "Couldn't open Discord link."
                     },
                 )
@@ -270,11 +278,13 @@ class CrashUI @JvmOverloads constructor(
                     }
                     ActionButton(tr("crashpatch.log")) {
                         val target = file ?: return@ActionButton
-                        runCatching {
+                        val opened = runCatching {
                             DesktopHelper.executeIfDesktop(Desktop.Action.OPEN) { desktop ->
                                 desktop.open(target)
                             }
-                        }
+                        }.onFailure { LOGGER.warn("Failed to open crash log file.", it) }
+                            .getOrDefault(false)
+                        if (!opened) statusText = "Couldn't open crash log file."
                     }
                 }
             }
@@ -304,7 +314,9 @@ class CrashUI @JvmOverloads constructor(
         }
     }
 
-    private fun tr(key: String): String = runCatching { I18n.get(key) }.getOrDefault(key)
+    private fun tr(key: String): String = runCatching { I18n.get(key) }
+        .onFailure { LOGGER.debug("Missing translation key: {}", key, it) }
+        .getOrDefault(key)
 
     enum class GuiType(val title: String) {
         INIT("crashpatch.init"), NORMAL("crashpatch.crash"), DISCONNECT("crashpatch.disconnect")
