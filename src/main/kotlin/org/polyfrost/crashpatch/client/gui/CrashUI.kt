@@ -1,19 +1,50 @@
 package org.polyfrost.crashpatch.client.gui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import net.minecraft.CrashReport
 import net.minecraft.ReportType
 import net.minecraft.client.gui.screens.Screen
-import org.polyfrost.crashpatch.CrashPatchConstants
+import net.minecraft.client.resources.language.I18n
 import org.polyfrost.crashpatch.client.LogUploader
 import org.polyfrost.crashpatch.client.crashes.CrashScan
 import org.polyfrost.crashpatch.client.crashes.CrashScanner
 import org.polyfrost.crashpatch.hooks.CrashReportHook
+import org.polyfrost.oneconfig.api.platform.v1.DesktopHelper
 import org.polyfrost.oneconfig.internal.OneConfig
 import org.polyfrost.oneconfig.internal.ui.compose.ComposeScreen
+import java.awt.Desktop
 import java.io.File
 import java.net.URI
-import java.util.function.Consumer
 
 class CrashUI @JvmOverloads constructor(
     private val scanText: String,
@@ -55,215 +86,222 @@ class CrashUI @JvmOverloads constructor(
     }
 
     private val crashScan: CrashScan? by lazy {
-        return@lazy CrashScanner.scan(scanText, type == GuiType.DISCONNECT)
-            .let { return@let if (it != null && it.solutions.isNotEmpty()) it else null }
+        CrashScanner.scan(scanText, type == GuiType.DISCONNECT)
+            ?.takeIf { it.solutions.isNotEmpty() }
     }
 
     var shouldCrash = false
 
     fun create(): Screen {
-        val builder = OCPolyUIBuilder.create()
-            .blurs()
-            .atResolution(1920f, 1080f)
-            .backgroundColor(rgba(21, 21, 21))
-            .size(650f, 600f)
-            .apply {
-                settings.debug = true
-            }.renderer(UIManager.INSTANCE.renderer).translatorDelegate("assets/crashpatch")
-
-        val onClose = Consumer { _: PolyUI ->
-            leaveWorldCrash = false
-        }
-
-        var selectedSolution: CrashScan.Solution? = crashScan?.solutions?.firstOrNull()
-        var block: Block? = null
-
-        val polyUI = builder.make(
-            Group(
-                Image("/assets/crashpatch/WarningTriangle.svg".image(), size = Vec2(20F, 20F)).named("WarningTriangle")
-                    .padded(
-                        0F,
-                        34F,
-                        0F,
-                        0F
-                    ),
-
-                Text(type.title, fontSize = 24f).setFont { PolyUI.defaultFonts.medium }.padded(0f, 10f, 0f, 0f),
-                Text("${type.title}.desc.1", fontSize = 14f).setPalette { text.secondary }
-                    .padded(0f, if (type != GuiType.INIT || crashScan != null) 16 + 14f else 16f, 0f, 0f),
-                if (type != GuiType.INIT || crashScan != null) Text("${type.title}.desc.2", fontSize = 14f).setPalette { text.secondary }
-                else null,
-                Text(
-                    if (type == GuiType.DISCONNECT) "crashpatch.disconnect.cause" else "crashpatch.crash.cause",
-                    fontSize = 16f
-                ).padded(0f, 24f, 0f, 0f),
-                Text(susThing, fontSize = 18f).setFont { PolyUI.defaultFonts.semiBold }.setPalette { brand.fg }
-                    .padded(0f, 8f, 0f, 0f),
-
-                Block(
-                    Block(
-                        // Selector
-                        Block(size = Vec2(0f, 2f)).ignoreLayout().radius(2f).afterParentInit(Int.MAX_VALUE) {
-                            palette = polyUI.colors.brand.fg
-                            selectedSolution?.let { solution ->
-                                this.y = parent.y + parent.height - 2f
-
-                                val index = crashScan?.solutions?.indexOf(solution) ?: 0
-                                val component = parent[1][index]
-
-                                this.width = component.width
-                                this.x = component.x
-                            }
-                        },
-
-                        // Tabs
-                        Group(
-                            children = (crashScan?.solutions?.mapToArray { solution ->
-                                val rightPad = when {
-                                    solution == crashScan?.solutions?.last() -> 0f
-                                    else -> 24f
-                                }
-
-                                Text(solution.name)
-                                    .setFont { PolyUI.defaultFonts.medium }
-                                    .padded(0f, 0f, rightPad, 0f)
-                                    .onClick {
-                                        selectedSolution = solution
-
-                                        parent.parent[0].let { selector ->
-                                            Resize(
-                                                drawable = selector,
-                                                width = width,
-                                                add = false,
-                                                animation = Animations.EaseInQuad.create(0.15.seconds)
-                                            ).add()
-
-                                            Move(
-                                                drawable = selector,
-                                                x = x,
-                                                add = false,
-                                                animation = Animations.EaseInQuad.create(0.15.seconds)
-                                            ).add()
-                                        }
-
-                                        block?.get(1)?.let { group ->
-                                            group[0] = createSolutionText(solution)
-                                        }
-
-                                        true
-                                    }
-                            } ?: arrayOf()),
-                        ).padded(12f, 0f, 0f, 0f),
-
-                        // Buttons
-                        Group(
-                            Button(leftImage = "/assets/crashpatch/copy.svg".image()).onClick {
-                                selectedSolution?.solutions?.joinToString("\n")?.let(Clipboard.getInstance()::setString).also { copyState ->
-                                    if (copyState == true) {
-                                        Notifications.enqueue(Notifications.Type.Success, CrashPatchConstants.NAME, "Copied to clipboard!")
-                                    }
-                                }
-
-                                selectedSolution != null
-                            }.setPalette { createCustomButtonPalette(GRAY_600) },
-                            Button(leftImage = "/assets/crashpatch/upload.svg".image()).onClick {
-                                selectedSolution?.let { solution ->
-                                    val link = LogUploader.upload(solution.solutions.joinToString(separator = "") { it + "\n" } + "\n\n" + (if (!solution.isCrashReport) scanText else ""))
-                                    Clipboard.getInstance().string = link
-
-                                    if (OmniDesktop.browse(URI.create(link))) {
-                                        Notifications.enqueue(Notifications.Type.Success, CrashPatchConstants.NAME, "Link copied to clipboard and opened in browser")
-                                    } else {
-                                        Notifications.enqueue(Notifications.Type.Warning, CrashPatchConstants.NAME, "Couldn't open link in browser, copied to clipboard instead.")
-                                    }
-                                }
-
-                                selectedSolution != null
-                            }.setPalette { createCustomButtonPalette(GRAY_600) },
-                        ),
-
-                        alignment = Align(
-                            pad = Vec2.ZERO,
-                            main = Align.Content.SpaceBetween,
-                            mode = Align.Mode.Horizontal
-                        ),
-                        size = Vec2(550f, 37f),
-                        color = GRAY_600
-                    ).radii(8f, 8f, 0f, 0f),
-
-                    // Selected solution goes here...
-                    Group(
-                        children = (selectedSolution?.let { arrayOf(createSolutionText(it)) } ?: arrayOf()),
-                        alignment = Align(
-                            main = Align.Content.Start,
-                            cross = Align.Content.Start,
-                            pad = Vec2.ZERO
-                        ),
-                        size = Vec2(518f, 105f),
-                    ).padded(16f, 8f),
-
-                    alignment = Align(
-                        main = Align.Content.Start,
-                        cross = Align.Content.Start,
-                        mode = Align.Mode.Vertical,
-                        pad = Vec2.ZERO
-                    ),
-                    size = Vec2(550f, 158f),
-                    color = GRAY_700
-                ).also { block = it }.padded(0f, 40f, 0f, 0f),
-
-                Text("crashpatch.discord.prompt", fontSize = 16f).padded(0f, 25f, 0f, 0f),
-                Group(
-                    Image("/assets/crashpatch/discord.svg".image(), size = Vec2(28f, 28f)),
-                    Text("crashpatch.link.discord.polyfrost", fontSize = 16f).setPalette { brand.fg }.padded(4f, 0f, 0f, 0f),
-                ).onClick {
-                    OmniDesktop.browse(URI.create("crashpatch.link.discord.polyfrost"))
-                    true
-                },
-
-                // Buttons
-                Group(
-                    Button(text = "crashpatch.continue", padding = Vec2(14f, 14f)).onClick {
-                        if (type == GuiType.INIT) {
-                            shouldCrash = true
-                        } else {
-                            closeScreen()
-                        }
-                    }.setPalette { brand.fg },
-                    Button(
-                        text = "crashpatch.log",
-                        rightImage = "/assets/crashpatch/open-external.svg".image(),
-                        padding = Vec2(14f, 14f)
-                    ).onClick {
-                        file?.let { OmniDesktop.open(it) }
-                        true
-                    }.setPalette { createCustomButtonPalette(rgba(21, 21, 21)) },
-                ).padded(0f, 32f, 0f, 0f),
-
-                size = Vec2(650f, 600f),
-                alignment = Align(pad = Vec2.ZERO, main = Align.Content.Center, cross = Align.Content.Center, mode = Align.Mode.Vertical)
-            ),
-        )
-
-        val screen = UIManager.INSTANCE.createPolyUIScreen(polyUI, 1920f, 1080f, false, true, onClose)
-        polyUI.window = UIManager.INSTANCE.createWindow()
         currentUI = this
-        currentInstance = screen as Screen
-        return screen
+        currentInstance = this
+        return this
+    }
+
+    override fun removed() {
+        leaveWorldCrash = false
+        currentInstance = null
+        currentUI = null
+        super.removed()
     }
 
     @Composable
     override fun compose() {
+        val clipboardManager = LocalClipboardManager.current
+        var selectedSolution by remember(crashScan) {
+            mutableStateOf(crashScan?.solutions?.firstOrNull())
+        }
+        var statusText by remember { mutableStateOf<String?>(null) }
+        val tabScroll = rememberScrollState()
+        val solutionScroll = rememberScrollState()
+        val pageScroll = rememberScrollState()
 
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF151515))
+                .padding(24.dp),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(pageScroll)
+                    .background(Color(0xFF212121), RoundedCornerShape(12.dp))
+                    .border(1.dp, Color(0xFF454545), RoundedCornerShape(12.dp))
+                    .padding(24.dp),
+            ) {
+                BasicText(
+                    text = tr(type.title),
+                    style = TextStyle(color = Color.White, fontSize = 26.sp),
+                )
+                Spacer(Modifier.height(12.dp))
+                BasicText(
+                    text = tr("${type.title}.desc.1"),
+                    style = TextStyle(color = Color(0xFFD0D0D0), fontSize = 14.sp),
+                )
+                if (type != GuiType.INIT || crashScan != null) {
+                    BasicText(
+                        text = tr("${type.title}.desc.2"),
+                        style = TextStyle(color = Color(0xFFD0D0D0), fontSize = 14.sp),
+                    )
+                }
+
+                Spacer(Modifier.height(24.dp))
+                BasicText(
+                    text = tr(if (type == GuiType.DISCONNECT) "crashpatch.disconnect.cause" else "crashpatch.crash.cause"),
+                    style = TextStyle(color = Color.White, fontSize = 17.sp),
+                )
+                Spacer(Modifier.height(8.dp))
+                BasicText(
+                    text = susThing,
+                    style = TextStyle(color = Color(0xFF6BA6FF), fontSize = 19.sp),
+                )
+
+                if (!crashScan?.solutions.isNullOrEmpty()) {
+                    Spacer(Modifier.height(24.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF2A2A2A), RoundedCornerShape(8.dp))
+                            .border(1.dp, Color(0xFF4A4A4A), RoundedCornerShape(8.dp))
+                            .padding(12.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(tabScroll),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            crashScan?.solutions?.forEach { solution ->
+                                val selected = selectedSolution == solution
+                                Box(
+                                    modifier = Modifier
+                                        .background(
+                                            color = if (selected) Color(0xFF4D8BFF) else Color(0xFF393939),
+                                            shape = RoundedCornerShape(6.dp),
+                                        )
+                                        .clickable { selectedSolution = solution }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                ) {
+                                    BasicText(
+                                        text = solution.name,
+                                        style = TextStyle(
+                                            color = if (selected) Color.White else Color(0xFFE0E0E0),
+                                            fontSize = 13.sp,
+                                        ),
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(12.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(130.dp)
+                                .background(Color(0xFF1B1B1B), RoundedCornerShape(6.dp))
+                                .padding(10.dp),
+                        ) {
+                            BasicText(
+                                text = selectedSolution?.solutions?.joinToString("\n").orEmpty(),
+                                style = TextStyle(color = Color(0xFFD9D9D9), fontSize = 12.sp),
+                                modifier = Modifier.verticalScroll(solutionScroll),
+                            )
+                        }
+
+                        Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ActionButton("Copy solutions") {
+                                val text = selectedSolution?.solutions?.joinToString("\n")
+                                if (text.isNullOrBlank()) return@ActionButton
+                                clipboardManager.setText(AnnotatedString(text))
+                                statusText = "Copied solutions to clipboard."
+                            }
+                            ActionButton("Upload solutions") {
+                                val solution = selectedSolution ?: return@ActionButton
+                                val body = solution.solutions.joinToString(separator = "\n") + "\n\n" +
+                                        (if (!solution.isCrashReport) scanText else "")
+                                val link = LogUploader.upload(body)
+                                clipboardManager.setText(AnnotatedString(link))
+                                val opened = runCatching { DesktopHelper.browse(URI.create(link)) }.getOrDefault(false)
+                                statusText = if (opened) {
+                                    "Uploaded and opened link. Copied to clipboard."
+                                } else {
+                                    "Uploaded link copied to clipboard."
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(24.dp))
+                BasicText(
+                    text = tr("crashpatch.discord.prompt"),
+                    style = TextStyle(color = Color.White, fontSize = 15.sp),
+                )
+                Spacer(Modifier.height(8.dp))
+                BasicText(
+                    text = tr("crashpatch.link.discord.polyfrost"),
+                    style = TextStyle(color = Color(0xFF6BA6FF), fontSize = 15.sp),
+                    modifier = Modifier.clickable {
+                        runCatching { DesktopHelper.browse(URI.create(tr("crashpatch.link.discord.polyfrost"))) }
+                    },
+                )
+
+                if (!statusText.isNullOrBlank()) {
+                    Spacer(Modifier.height(12.dp))
+                    BasicText(
+                        text = statusText!!,
+                        style = TextStyle(color = Color(0xFF9ED9A2), fontSize = 13.sp),
+                    )
+                }
+
+                Spacer(Modifier.height(24.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ActionButton(tr("crashpatch.continue"), primary = true) {
+                        if (type == GuiType.INIT) {
+                            shouldCrash = true
+                        } else {
+                            client.setScreen(null)
+                        }
+                    }
+                    ActionButton(tr("crashpatch.log")) {
+                        val target = file ?: return@ActionButton
+                        runCatching {
+                            DesktopHelper.executeIfDesktop(Desktop.Action.OPEN) { desktop ->
+                                desktop.open(target)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
-    private fun createSolutionText(solution: CrashScan.Solution) = Text(
-        solution.solutions.joinToString("\n"),
-        fontSize = 12f,
-        visibleSize = Vec2(518f, 105f),
-    ).setFont { PolyUI.monospaceFont }
+    @Composable
+    private fun ActionButton(
+        text: String,
+        primary: Boolean = false,
+        onClick: () -> Unit,
+    ) {
+        Box(
+            modifier = Modifier
+                .background(
+                    if (primary) Color(0xFF4D8BFF) else Color(0xFF2D2D2D),
+                    RoundedCornerShape(8.dp),
+                )
+                .border(1.dp, if (primary) Color(0xFF4D8BFF) else Color(0xFF4F4F4F), RoundedCornerShape(8.dp))
+                .clickable(onClick = onClick)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            BasicText(
+                text = text,
+                style = TextStyle(color = Color.White, fontSize = 14.sp),
+            )
+        }
+    }
 
-    private fun createCustomButtonPalette(normal: PolyColor) = Colors.Palette(normal, GRAY_700, GRAY_700, PolyColor.TRANSPARENT)
+    private fun tr(key: String): String = runCatching { I18n.get(key) }.getOrDefault(key)
 
     enum class GuiType(val title: String) {
         INIT("crashpatch.init"), NORMAL("crashpatch.crash"), DISCONNECT("crashpatch.disconnect")
