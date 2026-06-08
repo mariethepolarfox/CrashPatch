@@ -157,7 +157,10 @@ class CrashUI @JvmOverloads constructor(
                     style = TextStyle(color = Color(0xFF6BA6FF), fontSize = 19.sp),
                 )
 
-                if (!crashScan?.solutions.isNullOrEmpty()) {
+                val solutions = crashScan?.solutions.orEmpty()
+                if (solutions.isNotEmpty()) {
+                    val activeSolution = selectedSolution ?: solutions.first()
+
                     Spacer(Modifier.height(24.dp))
                     Column(
                         modifier = Modifier
@@ -172,7 +175,7 @@ class CrashUI @JvmOverloads constructor(
                                 .horizontalScroll(tabScroll),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            crashScan?.solutions?.forEach { solution ->
+                            solutions.forEach { solution ->
                                 val selected = selectedSolution == solution
                                 Box(
                                     modifier = Modifier
@@ -203,7 +206,7 @@ class CrashUI @JvmOverloads constructor(
                                 .padding(10.dp),
                         ) {
                             BasicText(
-                                text = selectedSolution?.solutions?.joinToString("\n").orEmpty(),
+                                text = activeSolution.solutions.joinToString("\n"),
                                 style = TextStyle(color = Color(0xFFD9D9D9), fontSize = 12.sp),
                                 modifier = Modifier.verticalScroll(solutionScroll),
                             )
@@ -212,15 +215,12 @@ class CrashUI @JvmOverloads constructor(
                         Spacer(Modifier.height(12.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             ActionButton("Copy solutions") {
-                                val text = selectedSolution?.solutions?.joinToString("\n")
-                                if (text.isNullOrBlank()) return@ActionButton
-                                clipboardManager.setText(AnnotatedString(text))
+                                clipboardManager.setText(AnnotatedString(activeSolution.solutions.joinToString("\n")))
                                 statusText = "Copied solutions to clipboard."
                             }
                             ActionButton("Upload solutions") {
-                                val solution = selectedSolution ?: return@ActionButton
-                                val body = solution.solutions.joinToString(separator = "\n") + "\n\n" +
-                                        (if (!solution.isCrashReport) scanText else "")
+                                val body = activeSolution.solutions.joinToString("\n") + "\n\n" +
+                                        (if (!activeSolution.isCrashReport) scanText else "")
                                 val link = LogUploader.upload(body)
                                 clipboardManager.setText(AnnotatedString(link))
                                 val opened = runCatching { DesktopHelper.browse(URI.create(link)) }.getOrDefault(false)
@@ -244,14 +244,17 @@ class CrashUI @JvmOverloads constructor(
                     text = tr("crashpatch.link.discord.polyfrost"),
                     style = TextStyle(color = Color(0xFF6BA6FF), fontSize = 15.sp),
                     modifier = Modifier.clickable {
-                        runCatching { DesktopHelper.browse(URI.create(tr("crashpatch.link.discord.polyfrost"))) }
+                        val opened = runCatching {
+                            DesktopHelper.browse(URI.create(tr("crashpatch.link.discord.polyfrost")))
+                        }.getOrDefault(false)
+                        if (!opened) statusText = "Couldn't open Discord link."
                     },
                 )
 
                 if (!statusText.isNullOrBlank()) {
                     Spacer(Modifier.height(12.dp))
                     BasicText(
-                        text = statusText!!,
+                        text = statusText.orEmpty(),
                         style = TextStyle(color = Color(0xFF9ED9A2), fontSize = 13.sp),
                     )
                 }
